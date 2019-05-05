@@ -1,5 +1,7 @@
 import enum
 import struct
+import byteprint
+
 from typing import Tuple
 
 
@@ -23,6 +25,9 @@ class Query:
         self.type = type_
         self.name = name
 
+    def __str__(self):
+        return f'{Type(self.type).name}, {self.name}'
+
 
 class Answer:
     def __init__(self, type_: Type, name, ttl, data):
@@ -37,6 +42,9 @@ class Answer:
             return self.data
 
         raise ValueError('Not an NS answer')
+
+    def __str__(self):
+        return f'{Type(self.type).name} {self.name} {self.ttl} {self.data}'
 
 
 class Flags:
@@ -55,6 +63,19 @@ class Flags:
         self.opcode = opcode
         self.is_response = is_response
 
+    def __str__(self):
+        return \
+            f'Is response: {self.is_response}\n' \
+                f'Opcode: {self.opcode}\n' \
+                f'Authoritative: {self.authoritative}\n' \
+                f'Truncated: {self.truncated}\n' \
+                f'Recursion desired: {self.recursion_desired}\n' \
+                f'Recursion available: {self.recursion_available}\n' \
+                f'Z: {self.z}\n' \
+                f'Answer authenticated: {self.answer_authenticated}\n' \
+                f'Non-authenticated data: {self.non_auth}\n' \
+                f'Reply code: {self.reply_code}'
+
 
 class Package:
     def __init__(self, flags: Flags, queries: [Query], answers: [Answer], authorities: [Answer], additional: [Answer]):
@@ -63,6 +84,31 @@ class Package:
         self.answers = answers
         self.authorities = authorities
         self.additional = additional
+
+    def __str__(self):
+        s = f'Flags:\n{self.flags}\n' \
+            f'Questions: {len(self.queries)}\n' \
+            f'Answer RRs: {len(self.answers)}\n' \
+            f'Authority RRs: {len(self.authorities)}\n' \
+            f'Additional RRs: {len(self.additional)}\n'
+
+        if len(self.queries) != 0:
+            s += 'Queries:\n'
+            s += '\n'.join(map(str, self.queries))
+
+        if len(self.answers) != 0:
+            s += '\nAnswers:\n'
+            s += '\n'.join(map(str, self.answers))
+
+        if len(self.authorities) != 0:
+            s += '\nAuthorities:\n'
+            s += '\n'.join(map(str, self.authorities))
+
+        if len(self.additional) != 0:
+            s += '\nAdditional:\n'
+            s += '\n'.join(map(str, self.additional))
+
+        return s
 
 
 class ParserError(Exception):
@@ -130,7 +176,7 @@ class _ParsingSession:
             raise ParserError(f'Unsupported class in answer: {class_}')
 
         if type_ == Type.A or type_ == Type.AAAA:
-            data = self.bytes[offset: offset + data_length]
+            data = self._to_address(self.bytes[offset: offset + data_length])
             offset += data_length
         elif type_ == Type.NS or type_ == Type.PTR:
             offset, data = self._read_string(offset)
@@ -138,6 +184,15 @@ class _ParsingSession:
             raise NotImplementedError(f'Not implemented read answer for type: {type_}')
 
         return offset, Answer(type_, name, ttl, data)
+
+    def _to_address(self, bytes_):
+        if len(bytes_) == 4:
+            return byteprint.to_ipv4_address(bytes_)
+
+        if len(bytes_) == 16:
+            return byteprint.to_ipv6_address(bytes_)
+
+        raise NotImplementedError(f"Unexpected bytes to parse address: {len(bytes_)}")
 
     def _read_string(self, offset) -> Tuple[int, str]:
         parts = []
@@ -157,12 +212,10 @@ class _ParsingSession:
 
                 break
 
-            part = ''
             offset += 1
-
-            for _ in range(length):
-                part += self.bytes[offset].decode()
-                offset += 1
+            part = self.bytes[offset: offset + length].decode()
+            offset += length
+            parts.append(part)
 
         return offset, '.'.join(parts)
 
