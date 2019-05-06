@@ -1,8 +1,9 @@
 import enum
 import struct
 import byteprint
+import itertools
 
-from typing import Tuple
+from typing import Tuple, List
 
 
 class Type(enum.IntEnum):
@@ -20,6 +21,18 @@ SUPPORTED_TYPES = set(Type)
 SUPPORTED_CLASSES = set(Class)
 
 
+def _name_to_bytes(name) -> bytes:
+    b = bytearray()
+
+    for p in name.split('.'):
+        b.append(len(p))
+        b.extend(p.encode())
+
+    b.append(0)
+
+    return bytes(b)
+
+
 class Query:
     def __init__(self, type_: Type, name):
         self.type = type_
@@ -27,6 +40,14 @@ class Query:
 
     def __str__(self):
         return f'{Type(self.type).name}, {self.name}'
+
+    def to_bytes(self) -> bytes:
+        b = bytearray()
+
+        b.extend(_name_to_bytes(self.name))
+        b.extend(struct.pack('! H H', self.type, Class.IN))
+
+        return bytes(b)
 
 
 class Answer:
@@ -46,6 +67,28 @@ class Answer:
     def __str__(self):
         return f'{Type(self.type).name} {self.name} {self.ttl} {self.data}'
 
+    def to_bytes(self) -> bytes:
+        b = bytearray()
+
+        b.extend(_name_to_bytes(self.name))
+
+        if self.type == Type.A:
+            data_length = 4
+            data = bytes(map(lambda x: int(x), self.data.split('.')))
+        elif self.type == Type.AAAA:
+            data_length = 16
+            data = bytes(map(lambda x: int(x), self.data.split(':')))
+        elif self.type == Type.PTR or self.type == Type.NS:
+            data = _name_to_bytes(self.data)
+            data_length = len(data)
+        else:
+            raise NotImplementedError
+
+        b.extend(struct.pack('! H H I H', self.type, Class.IN, self.ttl, data_length))
+        b.extend(data)
+
+        return bytes(b)
+
 
 class Flags:
     def __init__(self, is_response, opcode,
@@ -63,6 +106,22 @@ class Flags:
         self.opcode = opcode
         self.is_response = is_response
 
+    def to_bytes(self):
+        b = 0
+
+        b |= self.is_response << 15
+        b |= self.opcode << 11
+        b |= self.authoritative << 10
+        b |= self.truncated << 9
+        b |= self.recursion_desired << 8
+        b |= self.recursion_available << 7
+        b |= self.z << 6
+        b |= self.answer_authenticated << 5
+        b |= self.non_auth << 4
+        b |= self.reply_code
+
+        return b.to_bytes(2, byteorder='big')
+
     def __str__(self):
         return \
             f'Is response: {self.is_response}\n' \
@@ -78,7 +137,8 @@ class Flags:
 
 
 class Package:
-    def __init__(self, flags: Flags, queries: [Query], answers: [Answer], authorities: [Answer], additional: [Answer]):
+    def __init__(self, flags: Flags, queries: List[Query], answers: List[Answer],
+                 authorities: List[Answer], additional: List[Answer]):
         self.flags = flags
         self.queries = queries
         self.answers = answers
@@ -110,10 +170,26 @@ class Package:
 
         return s
 
+    def to_bytes(self) -> bytes:
+        b = bytearray()
+
+        b.extend(struct.pack('! H H H H H', self.flags.to_bytes(), len(self.queries), len(self.answers),
+                             len(self.authorities), len(self.additional)))
+
+        for q in itertools.chain(self.queries, self.answers, self.authorities, self.additional):
+            b.extend(q.to_bytes())
+
+        return bytes(b)
+
 
 class ParserError(Exception):
     def __init__(self, msg):
         super().__init__(msg)
+        self.__msg = msg
+
+    @property
+    def message(self):
+        return self.__msg
 
 
 class _ParsingSession:
@@ -241,8 +317,3 @@ class Parser:
         session = _ParsingSession(bytes_)
 
         return session.parse()
-
-
-class Serializer:
-    def serialize(self, package: Package) -> bytes:
-        raise NotImplementedError
