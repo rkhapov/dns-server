@@ -1,8 +1,8 @@
 import argparse
 import socket
+import dns
 
 from cache import Cache
-from dns import Parser, ParserError, Package, Flags, Answer, Type
 
 
 def parse_args():
@@ -12,12 +12,16 @@ def parse_args():
     return parser.parse_args()
 
 
+class Client:
+    pass
+
+
 class Server:
     def __init__(self, cache: Cache):
         self.__cache = cache
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('127.0.0.1', 53))
-        self.__parser = Parser()
+        self.__parser = dns.Parser()
 
     def __enter__(self):
         return self
@@ -32,21 +36,52 @@ class Server:
             while True:
                 bytes_, address = self.socket.recvfrom(2048)
 
-                self._handle_request(bytes_, address)
+                answer = self._handle_request(bytes_, address)
+
+                self.socket.sendto(answer.to_bytes(), address)
         except KeyboardInterrupt:
-            print('\nServer stopped')
+            print('\nServer stopping...')
 
     def _handle_request(self, bytes_, address):
         try:
             package = self.__parser.parse(bytes_)
+            query = package.queries[0]
 
-            flags = Flags(is_response=1, opcode=0, authoritative=0, truncated=0, recursion_desired=1, recursion_available=1, z=0, answer_authenticated=0, non_auth=0, reply_code=0)
-            ans = Package(flags, [], [Answer(Type.A, package.queries[0].name, 1488, '8.9.10.11')], [], [])
+            records = self.__cache.get(query.type, query.name)
 
-            self.socket.sendto(ans.to_bytes(), address)
+            if records is None:
+                self._resolve_query(query, bytes_)
+                records = self.__cache.get(query.type, query.name)
 
-        except ParserError as e:
+            answers = []
+
+            for record in records:
+                answers.append(dns.Answer(query.type, query.name, record.ttl, record.value))
+
+            return dns.Package(package.id,
+                               dns.Flags(is_response=1, recursion_available=1, recursion_desired=1),
+                               package.queries,
+                               answers, [], [])
+
+        except dns.ParserError as e:
             print(f'The package will be ignored: {e.message}')
+
+    def _resolve_query(self, query: dns.Query, bytes_):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.sendto(bytes_, ('8.8.8.8', 53))
+
+        ans = s.recv(2048)
+
+        p = self.__parser.parse(ans)
+
+        for answer in p.answers:
+            self.__cache.put(answer.type, answer.name, answer.ttl, answer.data)
+
+        for answer in p.authorities:
+            self.__cache.put(answer.type, answer.name, answer.ttl, answer.data)
+
+        for answer in p.additional:
+            self.__cache.put(answer.type, answer.name, answer.ttl, answer.data)
 
 
 def main():

@@ -91,10 +91,10 @@ class Answer:
 
 
 class Flags:
-    def __init__(self, is_response, opcode,
-                 authoritative, truncated, recursion_desired,
-                 recursion_available, z, answer_authenticated,
-                 non_auth, reply_code):
+    def __init__(self, is_response=0, opcode=0,
+                 authoritative=0, truncated=0, recursion_desired=0,
+                 recursion_available=0, z=0, answer_authenticated=0,
+                 non_auth=0, reply_code=0):
         self.authoritative = authoritative
         self.truncated = truncated
         self.recursion_desired = recursion_desired
@@ -106,7 +106,7 @@ class Flags:
         self.opcode = opcode
         self.is_response = is_response
 
-    def to_bytes(self):
+    def to_int(self):
         b = 0
 
         b |= self.is_response << 15
@@ -120,25 +120,45 @@ class Flags:
         b |= self.non_auth << 4
         b |= self.reply_code
 
-        return b.to_bytes(2, byteorder='big')
+        return b
 
     def __str__(self):
-        return \
-            f'Is response: {self.is_response}\n' \
-                f'Opcode: {self.opcode}\n' \
-                f'Authoritative: {self.authoritative}\n' \
-                f'Truncated: {self.truncated}\n' \
-                f'Recursion desired: {self.recursion_desired}\n' \
-                f'Recursion available: {self.recursion_available}\n' \
-                f'Z: {self.z}\n' \
-                f'Answer authenticated: {self.answer_authenticated}\n' \
-                f'Non-authenticated data: {self.non_auth}\n' \
-                f'Reply code: {self.reply_code}'
+        p = []
+
+        if self.is_response:
+            p.append('r')
+
+        if self.authoritative:
+            p.append('a')
+
+        if self.truncated:
+            p.append('t')
+
+        if self.recursion_desired:
+            p.append('rd')
+
+        if self.recursion_available:
+            p.append('ra')
+
+        return ' '.join(p)
+        #
+        # return \
+        #     f'Is response: {self.is_response}\n' \
+        #         f'Opcode: {self.opcode}\n' \
+        #         f'Authoritative: {self.authoritative}\n' \
+        #         f'Truncated: {self.truncated}\n' \
+        #         f'Recursion desired: {self.recursion_desired}\n' \
+        #         f'Recursion available: {self.recursion_available}\n' \
+        #         f'Z: {self.z}\n' \
+        #         f'Answer authenticated: {self.answer_authenticated}\n' \
+        #         f'Non-authenticated data: {self.non_auth}\n' \
+        #         f'Reply code: {self.reply_code}'
 
 
 class Package:
-    def __init__(self, flags: Flags, queries: List[Query], answers: List[Answer],
+    def __init__(self, id_, flags: Flags, queries: List[Query], answers: List[Answer],
                  authorities: List[Answer], additional: List[Answer]):
+        self.id = id_
         self.flags = flags
         self.queries = queries
         self.answers = answers
@@ -146,34 +166,30 @@ class Package:
         self.additional = additional
 
     def __str__(self):
-        s = f'Flags:\n{self.flags}\n' \
-            f'Questions: {len(self.queries)}\n' \
-            f'Answer RRs: {len(self.answers)}\n' \
-            f'Authority RRs: {len(self.authorities)}\n' \
-            f'Additional RRs: {len(self.additional)}\n'
+        s = f'id: {self.id} flags: {self.flags}\n'
 
         if len(self.queries) != 0:
-            s += 'Queries:\n'
-            s += '\n'.join(map(str, self.queries))
+            s += 'Queries:\n  '
+            s += '\n  '.join(map(str, self.queries))
 
         if len(self.answers) != 0:
-            s += '\nAnswers:\n'
-            s += '\n'.join(map(str, self.answers))
+            s += '\nAnswers:\n  '
+            s += '\n  '.join(map(str, self.answers))
 
         if len(self.authorities) != 0:
-            s += '\nAuthorities:\n'
-            s += '\n'.join(map(str, self.authorities))
+            s += '\nAuthorities:\n  '
+            s += '\n  '.join(map(str, self.authorities))
 
         if len(self.additional) != 0:
-            s += '\nAdditional:\n'
-            s += '\n'.join(map(str, self.additional))
+            s += '\nAdditional:\n  '
+            s += '\n  '.join(map(str, self.additional))
 
         return s
 
     def to_bytes(self) -> bytes:
         b = bytearray()
 
-        b.extend(struct.pack('! H H H H H', self.flags.to_bytes(), len(self.queries), len(self.answers),
+        b.extend(struct.pack('! H H H H H H', self.id, self.flags.to_int(), len(self.queries), len(self.answers),
                              len(self.authorities), len(self.additional)))
 
         for q in itertools.chain(self.queries, self.answers, self.authorities, self.additional):
@@ -225,7 +241,7 @@ class _ParsingSession:
             offset, add = self._read_answer(offset)
             additional.append(add)
 
-        return Package(flags, queries, answers, authoritative, additional)
+        return Package(id_, flags, queries, answers, authoritative, additional)
 
     def _read_query(self, offset) -> Tuple[int, Query]:
         offset, name = self._read_string(offset)
