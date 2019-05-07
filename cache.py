@@ -60,14 +60,14 @@ class _CacheCleaner(threading.Thread):
                         if current_time - record.creation_time > record.ttl:
                             expired_indexes.append(i)
 
-                    for i in expired_indexes:
+                    for i in sorted(expired_indexes, reverse=True):
                         del records[i]
 
                     if len(records) == 0:
                         requests_to_delete.append(request)
 
                 for request in requests_to_delete:
-                    del requests_to_delete[request]
+                    del request_to_list[request]
 
 
 class Cache:
