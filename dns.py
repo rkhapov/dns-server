@@ -77,7 +77,7 @@ class Answer:
             data = bytes(map(lambda x: int(x), self.data.split('.')))
         elif self.type == Type.AAAA:
             data_length = 16
-            data = bytes(map(lambda x: int(x), self.data.split(':')))
+            data = bytearray.fromhex(''.join(self.data.split(':')))
         elif self.type == Type.PTR or self.type == Type.NS:
             data = _name_to_bytes(self.data)
             data_length = len(data)
